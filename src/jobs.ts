@@ -298,6 +298,15 @@ export async function runJob(job: Job, ctx: JobContext, env: Env): Promise<unkno
 
   for (let idx = 0; idx < misses.length; idx += BATCH_CONCURRENCY) {
     if (ctx.signal.aborted || (health.serpExhausted && health.exaExhausted)) {
+      const remaining = misses.slice(idx)
+      await Promise.all(
+        remaining.map((miss) =>
+          cronCtx.records.update('receipt_lines', miss.lineId, {
+            swapStatus: 'no_swap',
+            swapSource: 'none',
+          }),
+        ),
+      )
       break
     }
     const batch = misses.slice(idx, idx + BATCH_CONCURRENCY)
