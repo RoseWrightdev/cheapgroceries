@@ -75,6 +75,7 @@ export function SavingsView({ headerActions }: { headerActions?: React.ReactNode
               type="submit"
               size="sm"
               variant="outline"
+              className="h-7 px-2.5 text-xs"
               disabled={s.savingLocality || s.zipInput.length < 5}
             >
               {s.savingLocality ? 'Saving...' : 'Set Area'}
