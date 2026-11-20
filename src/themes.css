@@ -1,0 +1,32 @@
+/*
+ * CheapGroceries — "market" theme
+ * Warm grocery-receipt paper surface paired with deep forest-pine savings green
+ * and warm terracotta overpay highlights.
+ */
+
+[data-theme="market"] {
+  color-scheme: light;
+  --color-background: #faf9f5;
+  --color-foreground: #181a17;
+  --color-card: #ffffff;
+  --color-card-foreground: #181a17;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #181a17;
+  --color-primary: #164e3a;
+  --color-primary-foreground: #faf9f5;
+  --color-secondary: #f0eee6;
+  --color-secondary-foreground: #181a17;
+  --color-muted: #f2f0e8;
+  --color-muted-foreground: #5c6158;
+  --color-accent: #e5efe9;
+  --color-accent-foreground: #123e2e;
+  --color-destructive: #c2410c;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e4e1d6;
+  --color-input: #dcd8cb;
+  --color-ring: #164e3a;
+  --shadow-card: 0 1px 2px 0 rgba(24, 26, 23, 0.04);
+  --shadow-card-hover: 0 4px 12px 0 rgba(24, 26, 23, 0.07);
+  --color-shell: #f4f2eb;
+  --color-shell-panel: #ffffff;
+}
