@@ -673,4 +673,28 @@ export const actions: Record<string, ActionHandler<Env>> = {
     )
     return { success: true, data: { deals: results.flat() } }
   },
+
+  deleteUserData: async ({ userId, tools }) => {
+    const memberships = getRecords<TeamMemberData>(
+      await tools.query('team_members', { where: { userId }, limit: 20 }),
+    )
+
+    for (const member of memberships) {
+      const householdId = member.data.teamId
+      const hh = getRecord<HouseholdData>(await tools.get('households', householdId))
+      if (hh?.data.ownerId === userId) {
+        await Promise.all([
+          tools.deleteWhere('receipt_lines', { householdId }),
+          tools.deleteWhere('receipt_scans', { householdId }),
+          tools.deleteWhere('team_members', { teamId: householdId }),
+          tools.remove('households', householdId),
+        ])
+      } else {
+        await tools.remove('team_members', member.recordId)
+      }
+    }
+
+    await tools.update('users', userId, { householdId: '' })
+    return { success: true, data: { deleted: true } }
+  },
 }
