@@ -7,6 +7,7 @@ export interface HouseholdData {
   ownerId: string
   monthlyBudgetCents: number
   zipCode?: string
+  locationLabel?: string
   nearbyStores?: string
   hasPrime?: number
   detectedMemberships?: string
@@ -22,6 +23,7 @@ export const householdsSchema: CollectionSchema = {
     { name: 'ownerId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'monthlyBudgetCents', storage: 'number', interpretation: 'plain', default: 60000 },
     { name: 'zipCode', storage: 'text', interpretation: 'plain', maxLength: 12 },
+    { name: 'locationLabel', storage: 'text', interpretation: 'plain', maxLength: 120 },
     { name: 'nearbyStores', storage: 'text', interpretation: 'plain', maxLength: 1000 },
     { name: 'hasPrime', storage: 'number', interpretation: 'boolean', default: 0 },
     { name: 'detectedMemberships', storage: 'text', interpretation: 'plain', maxLength: 500 },

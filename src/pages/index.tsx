@@ -84,8 +84,8 @@ export default function Landing() {
 
               <div className="mt-10 grid grid-cols-3 gap-4 border-t border-border pt-8">
                 <div>
-                  <div className="font-mono text-2xl font-bold tabular-nums text-primary">18–32%</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Average savings on staples</div>
+                  <div className="font-mono text-2xl font-bold tabular-nums text-primary">Live</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Verified local store prices</div>
                 </div>
                 <div>
                   <div className="font-mono text-2xl font-bold tabular-nums text-foreground">1 click</div>

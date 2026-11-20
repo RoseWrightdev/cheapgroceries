@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AuthOverlay, useAuthProfileReady, useJobs, useQuery } from 'deepspace'
-import { History, Loader2, Mail } from 'lucide-react'
+import { AuthOverlay, useAuthProfileReady, useQuery } from 'deepspace'
+import { History, Mail } from 'lucide-react'
 import { SavingsView } from '../../components/SavingsView'
 import { ScanReceiptModal } from '../../components/ScanReceiptModal'
 import { Button } from '../../components/ui'
-import { SCOPE_ID } from '../../constants'
 import type { ReceiptScanData } from '../../schemas/receipt-scans-schema'
 
 export default function HomePage() {
@@ -14,12 +13,10 @@ export default function HomePage() {
   const { records: scans, status: scansStatus } = useQuery<ReceiptScanData>('receipt_scans', {
     limit: 50,
   })
-  const { jobs } = useJobs(SCOPE_ID)
 
   const [scannerOpen, setScannerOpen] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
 
-  const activeJobs = jobs.filter((j) => j.status === 'queued' || j.status === 'running')
   const hasAuditedReceipts = isSignedIn && scans.length > 0
 
   function handleAction(action: 'email' | 'history') {
@@ -37,20 +34,6 @@ export default function HomePage() {
   if (hasAuditedReceipts) {
     return (
       <>
-        {activeJobs.length > 0 && (
-          <div className="mx-auto max-w-5xl px-6 pt-6">
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-accent/60 px-4 py-2.5 text-xs">
-              <span className="inline-flex items-center gap-2 font-medium text-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
-                {activeJobs[0].progressMessage || 'Checking nearby stores...'}
-              </span>
-              <span className="font-mono font-semibold tabular-nums text-primary">
-                {Math.round((activeJobs[0].progress ?? 0) * 100)}%
-              </span>
-            </div>
-          </div>
-        )}
-
         <SavingsView
           headerActions={
             <Button

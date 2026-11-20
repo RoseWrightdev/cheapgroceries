@@ -1,169 +1,187 @@
 /**
- * Regional grocery chain locality + net-of-shipping / trip-worth-it guardrails.
- * Ensures swap recommendations only compare against stores actually in the
- * user's area and never claim fake savings wiped out by shipping or an extra drive.
+ * Dynamic local grocery store discovery (via Google Maps `serpapi/places-search`)
+ * + net-of-shipping & extra-trip savings guardrails.
  */
 
-export const ALL_KNOWN_STORES = [
+export const AMAZON_SHIPPING_CENTS = 699
+export const AMAZON_FREE_SHIPPING_MIN_CENTS = 3500
+export const MIN_EXTRA_TRIP_SAVINGS_CENTS = 300
+
+export const DEFAULT_STORES = [
   'Aldi',
   'Walmart',
   'Target',
   'Costco',
   'Trader Joe’s',
-  'Cub',
-  'Hy-Vee',
-  'Kroger',
-  'Meijer',
-  'H-E-B',
-  'Publix',
-  'Safeway',
-  'Wegmans',
-  'ShopRite',
-  'Sprouts',
   'Amazon',
-] as const
+]
 
-export const AMAZON_SHIPPING_CENTS = 699
-export const AMAZON_FREE_SHIPPING_MIN_CENTS = 3500
-export const MIN_EXTRA_TRIP_SAVINGS_CENTS = 300 // Don't send someone to another store for < $3
+const DISCOVERED_STORES_MAX = 11
+const CACHE_KEY_LENGTH_MAX = 120
 
-/**
- * Infer realistic local grocery chains from a US 5-digit ZIP code prefix.
- */
-export function getRegionalStoresForZip(zipCode: string): string[] {
-  const digits = zipCode.replace(/\D/g, '')
-  if (digits.length < 3) {
-    return ['Aldi', 'Walmart', 'Target', 'Costco', 'Trader Joe’s', 'Amazon']
-  }
-  const prefix = Number.parseInt(digits.slice(0, 3), 10)
-
-  // Minnesota (550-567)
-  if (prefix >= 550 && prefix <= 567) {
-    return ['Aldi', 'Cub', 'Target', 'Walmart', 'Costco', 'Hy-Vee', 'Trader Joe’s', 'Amazon']
-  }
-  // Iowa / Nebraska / Dakotas / Kansas / Missouri (500-528, 570-588, 630-693)
-  if (
-    (prefix >= 500 && prefix <= 528) ||
-    (prefix >= 570 && prefix <= 588) ||
-    (prefix >= 630 && prefix <= 693)
-  ) {
-    return ['Aldi', 'Hy-Vee', 'Walmart', 'Target', 'Costco', 'Amazon']
-  }
-  // Texas (750-799)
-  if (prefix >= 750 && prefix <= 799) {
-    return ['H-E-B', 'Aldi', 'Walmart', 'Target', 'Costco', 'Kroger', 'Trader Joe’s', 'Amazon']
-  }
-  // Southeast: FL / GA / AL / SC / NC / TN (270-349, 350-385)
-  if (prefix >= 270 && prefix <= 385) {
-    return ['Publix', 'Aldi', 'Walmart', 'Target', 'Costco', 'Kroger', 'Trader Joe’s', 'Amazon']
-  }
-  // Great Lakes / Midwest: OH / IN / MI / IL / WI (430-499, 530-549, 600-629)
-  if (
-    (prefix >= 430 && prefix <= 499) ||
-    (prefix >= 530 && prefix <= 549) ||
-    (prefix >= 600 && prefix <= 629)
-  ) {
-    return ['Aldi', 'Meijer', 'Kroger', 'Walmart', 'Target', 'Costco', 'Trader Joe’s', 'Amazon']
-  }
-  // Northeast: MA / NY / NJ / PA / CT / MD / VA (010-246)
-  if (prefix >= 10 && prefix <= 246) {
-    return ['Aldi', 'ShopRite', 'Wegmans', 'Target', 'Walmart', 'Costco', 'Trader Joe’s', 'Amazon']
-  }
-  // West Coast / Mountain: CA / WA / OR / CO / AZ (800-994)
-  if (prefix >= 800 && prefix <= 994) {
-    return ['Trader Joe’s', 'Safeway', 'Sprouts', 'Costco', 'Walmart', 'Target', 'Aldi', 'Amazon']
-  }
-
-  return ['Aldi', 'Walmart', 'Target', 'Costco', 'Trader Joe’s', 'Amazon']
+const US_STATES: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi',
+  MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire',
+  NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina',
+  ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania',
+  RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee',
+  TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington',
+  WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming', DC: 'District of Columbia',
 }
 
-export function parseNearbyStores(raw?: string): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      return parsed.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-    }
-  } catch {
-    // ignore malformed JSON
+/** Clean a Google Maps place title into a concise store name. */
+export function cleanStoreName(raw: string): string {
+  const cleaned = raw
+    .replace(/\s*\(via [^)]+\)/gi, '')
+    .replace(/\s+[-–—|]\s+.*$/i, '')
+    .replace(/\s+#\d+.*$/i, '')
+    .replace(/\b(supercenter|neighborhood market|wholesale|grocery|hypermarket|express)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (/^aldi$/i.test(cleaned)) {
+    return 'Aldi'
+  }
+  if (/^cub foods?$/i.test(cleaned)) {
+    return 'Cub'
+  }
+  return cleaned || raw.trim()
+}
+
+function getPlaceList(raw: unknown): unknown[] {
+  if (!raw || typeof raw !== 'object') {
+    return []
+  }
+  const obj = raw as Record<string, unknown>
+  if (Array.isArray(obj.local_results)) {
+    return obj.local_results
+  }
+  if (Array.isArray(obj.places)) {
+    return obj.places
+  }
+  if (Array.isArray(obj.results)) {
+    return obj.results
   }
   return []
 }
 
-export function storeMatchesAllowed(retailer: string | undefined, allowedStores: string[]): boolean {
-  if (!retailer) return false
-  if (allowedStores.length === 0) return true
-  const r = retailer.toLowerCase()
-  return allowedStores.some((s) => {
-    const clean = s.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const rClean = r.replace(/[^a-z0-9]/g, '')
-    return rClean.includes(clean) || clean.includes(rClean)
-  })
-}
-
-/**
- * Map a US 5-digit ZIP code prefix to a canonical Google / SerpApi location string
- * so Google Shopping returns local regional pricing without rejecting raw ZIPs.
- */
-export function zipToGoogleLocation(zipCode: string): string {
-  const digits = zipCode.replace(/\D/g, '')
-  if (digits.length < 3) return 'United States'
-  const prefix = Number.parseInt(digits.slice(0, 3), 10)
-
-  if (prefix >= 550 && prefix <= 567) return 'Minneapolis, Minnesota, United States'
-  if (prefix >= 500 && prefix <= 528) return 'Des Moines, Iowa, United States'
-  if (prefix >= 530 && prefix <= 549) return 'Milwaukee, Wisconsin, United States'
-  if (prefix >= 600 && prefix <= 629) return 'Chicago, Illinois, United States'
-  if (prefix >= 750 && prefix <= 799) return 'Austin, Texas, United States'
-  if (prefix >= 320 && prefix <= 349) return 'Miami, Florida, United States'
-  if (prefix >= 300 && prefix <= 319) return 'Atlanta, Georgia, United States'
-  if (prefix >= 100 && prefix <= 149) return 'New York, New York, United States'
-  if (prefix >= 10 && prefix <= 27) return 'Boston, Massachusetts, United States'
-  if (prefix >= 900 && prefix <= 961) return 'Los Angeles, California, United States'
-  if (prefix >= 980 && prefix <= 994) return 'Seattle, Washington, United States'
-  if (prefix >= 800 && prefix <= 816) return 'Denver, Colorado, United States'
+/** Extract canonical "City, State, United States" from Google Maps addresses. */
+export function parseGoogleMapsLocation(raw: unknown): string {
+  for (const item of getPlaceList(raw)) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    const addr = (item as Record<string, unknown>).address
+    if (typeof addr !== 'string') {
+      continue
+    }
+    const match = addr.match(/,\s*([A-Za-z .'-]{2,40}),\s*([A-Z]{2})\b/)
+    if (match && US_STATES[match[2]]) {
+      return `${match[1].trim()}, ${US_STATES[match[2]]}, United States`
+    }
+  }
   return 'United States'
 }
 
-/**
- * Build a verified live search URL for a retailer + product name.
- * Preserves live Amazon Associate or Google Shopping merchant URLs when present.
- */
+export function regionalCacheKey(skuKey: string, zipCode?: string): string {
+  const prefix = (zipCode ?? '').replace(/\D/g, '').slice(0, 3)
+  if (prefix.length === 3) {
+    return `${prefix}:${skuKey}`.slice(0, CACHE_KEY_LENGTH_MAX)
+  }
+  return skuKey
+}
+
+/** Extract unique nearby grocery store names from Google Maps results. */
+export function parseGoogleMapsStores(raw: unknown): string[] {
+  const seen = new Map<string, string>()
+
+  for (const item of getPlaceList(raw)) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    const rec = item as Record<string, unknown>
+    let rawTitle = ''
+    if (typeof rec.title === 'string') {
+      rawTitle = rec.title
+    } else if (typeof rec.name === 'string') {
+      rawTitle = rec.name
+    }
+    if (!rawTitle) {
+      continue
+    }
+    const name = cleanStoreName(rawTitle)
+    const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (key.length >= 2 && !seen.has(key)) {
+      seen.set(key, name)
+    }
+    if (seen.size >= DISCOVERED_STORES_MAX) {
+      break
+    }
+  }
+
+  const stores = Array.from(seen.values())
+  if (stores.length > 0 && !seen.has('amazon')) {
+    stores.push('Amazon')
+  }
+  return stores
+}
+
+export function storeMatchesAllowed(
+  retailer: string | undefined,
+  allowedStores: string[],
+): boolean {
+  if (!retailer) {
+    return false
+  }
+  if (allowedStores.length === 0) {
+    return true
+  }
+  const normalized = cleanStoreName(retailer).toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (normalized.length < 2) {
+    return false
+  }
+  return allowedStores.some((store) => {
+    const clean = cleanStoreName(store).toLowerCase().replace(/[^a-z0-9]/g, '')
+    return clean.length >= 2 && (normalized.includes(clean) || clean.includes(normalized))
+  })
+}
+
+const KNOWN_SEARCH_URLS: Array<[string, (q: string) => string]> = [
+  ['aldi', (q) => `https://shop.aldi.us/store/aldi/s?k=${q}`],
+  ['walmart', (q) => `https://www.walmart.com/search?q=${q}`],
+  ['target', (q) => `https://www.target.com/s?searchTerm=${q}`],
+  ['cub', (q) => `https://www.instacart.com/store/cub-foods/s?k=${q}`],
+  ['costco', (q) => `https://www.costco.com/CatalogSearch?keyword=${q}`],
+  ['amazon', (q) => `https://www.amazon.com/s?k=${q}`],
+  ['trader', (q) => `https://www.traderjoes.com/home/search?q=${q}&section=products`],
+  ['hy-vee', (q) => `https://www.hy-vee.com/aisles-online/search?search=${q}`],
+  ['h-e-b', (q) => `https://www.heb.com/search/?q=${q}`],
+  ['kroger', (q) => `https://www.kroger.com/search?query=${q}`],
+]
+
 export function resolveRetailerUrl(
   retailer: string | undefined,
   itemName: string,
   existingUrl?: string,
 ): string {
-  // Keep real live product URLs intact (excluding legacy broken search URLs)
-  if (
-    existingUrl &&
-    /^https:\/\//i.test(existingUrl) &&
-    !/aldi\.us\/results/i.test(existingUrl) &&
-    !/cub\.com\/sm\/pickup/i.test(existingUrl)
-  ) {
+  const isBrokenLegacy = Boolean(
+    existingUrl && /aldi\.us\/results|cub\.com\/sm\/pickup/i.test(existingUrl),
+  )
+  if (existingUrl && /^https:\/\//i.test(existingUrl) && !isBrokenLegacy) {
     return existingUrl
   }
-  const cleanQuery = itemName
-    .replace(/\b(aldi|walmart|cub|costco|target|hy-vee|heb|h-e-b|kroger|publix|safeway)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const q = encodeURIComponent(cleanQuery || itemName)
+  const encoded = encodeURIComponent(itemName.trim())
   const lower = (retailer ?? '').toLowerCase()
-
-  if (lower.includes('aldi')) return `https://shop.aldi.us/store/aldi/s?k=${q}`
-  if (lower.includes('walmart')) return `https://www.walmart.com/search?q=${q}`
-  if (lower.includes('target')) return `https://www.target.com/s?searchTerm=${q}`
-  if (lower.includes('cub')) return `https://www.instacart.com/store/cub-foods/s?k=${q}`
-  if (lower.includes('costco')) return `https://www.costco.com/CatalogSearch?keyword=${q}`
-  if (lower.includes('hy-vee') || lower.includes('hyvee')) {
-    return `https://www.hy-vee.com/aisles-online/search?search=${q}`
+  const match = KNOWN_SEARCH_URLS.find(([key]) => lower.includes(key))
+  if (match) {
+    return match[1](encoded)
   }
-  if (lower.includes('h-e-b') || lower.includes('heb')) return `https://www.heb.com/search/?q=${q}`
-  if (lower.includes('kroger')) return `https://www.kroger.com/search?query=${q}`
-  if (lower.includes('publix')) return `https://www.instacart.com/store/publix/s?k=${q}`
-  if (lower.includes('safeway')) return `https://www.safeway.com/shop/search-results.html?q=${q}`
-  if (lower.includes('trader')) return `https://www.traderjoes.com/home/search?q=${q}&section=products`
-  return `https://www.amazon.com/s?k=${q}`
+  const fallback = encodeURIComponent(`${retailer ?? ''} ${itemName}`.trim())
+  return `https://www.google.com/search?tbm=shop&q=${fallback}`
 }
 
 export interface StoreSavingsSummary {
@@ -176,10 +194,6 @@ export interface StoreSavingsSummary {
   worthIt: boolean
 }
 
-/**
- * Compute net savings per store after factoring in Amazon shipping (when no Prime
- * and basket < $35) and extra-trip threshold for physical stores.
- */
 export function computeNetStoreSavings(
   items: Array<{
     retailer?: string
@@ -192,49 +206,50 @@ export function computeNetStoreSavings(
 ): Map<string, StoreSavingsSummary> {
   const byStore = new Map<
     string,
-    { grossSavingsCents: number; basketCostCents: number; itemCount: number; sameStoreOnly: boolean }
+    { gross: number; basket: number; count: number; sameStoreOnly: boolean }
   >()
 
   for (const item of items) {
-    if (!item.retailer || item.savingsCents <= 0) continue
-    if (!storeMatchesAllowed(item.retailer, options.allowedStores)) continue
-
+    if (!item.retailer || item.savingsCents <= 0) {
+      continue
+    }
+    if (!storeMatchesAllowed(item.retailer, options.allowedStores)) {
+      continue
+    }
     const qty = Math.max(1, Math.round(item.quantity || 1))
-    const key = item.retailer
-    const current = byStore.get(key) ?? {
-      grossSavingsCents: 0,
-      basketCostCents: 0,
-      itemCount: 0,
+    const cur = byStore.get(item.retailer) ?? {
+      gross: 0,
+      basket: 0,
+      count: 0,
       sameStoreOnly: true,
     }
-    current.grossSavingsCents += item.savingsCents * qty
-    current.basketCostCents += item.swapPriceCents * qty
-    current.itemCount += 1
-    if (!item.storeName.toLowerCase().includes(key.toLowerCase())) {
-      current.sameStoreOnly = false
+    cur.gross += item.savingsCents * qty
+    cur.basket += item.swapPriceCents * qty
+    cur.count += 1
+    if (!item.storeName.toLowerCase().includes(item.retailer.toLowerCase())) {
+      cur.sameStoreOnly = false
     }
-    byStore.set(key, current)
+    byStore.set(item.retailer, cur)
   }
 
   const out = new Map<string, StoreSavingsSummary>()
-  for (const [store, stats] of byStore.entries()) {
+  for (const [store, stats] of byStore) {
     const isAmazon = store.toLowerCase().includes('amazon')
-    const shippingCostCents =
-      isAmazon && !options.hasPrime && stats.basketCostCents < AMAZON_FREE_SHIPPING_MIN_CENTS
-        ? AMAZON_SHIPPING_CENTS
-        : 0
-    const netSavingsCents = Math.max(0, stats.grossSavingsCents - shippingCostCents)
+    const needsShipping =
+      isAmazon && !options.hasPrime && stats.basket < AMAZON_FREE_SHIPPING_MIN_CENTS
+    const shipping = needsShipping ? AMAZON_SHIPPING_CENTS : 0
+    const net = Math.max(0, stats.gross - shipping)
     const worthIt = isAmazon
-      ? netSavingsCents > 0
-      : stats.sameStoreOnly || netSavingsCents >= MIN_EXTRA_TRIP_SAVINGS_CENTS
+      ? net > 0
+      : stats.sameStoreOnly || net >= MIN_EXTRA_TRIP_SAVINGS_CENTS
 
     out.set(store, {
       store,
-      grossSavingsCents: stats.grossSavingsCents,
-      shippingCostCents,
-      netSavingsCents,
-      basketCostCents: stats.basketCostCents,
-      itemCount: stats.itemCount,
+      grossSavingsCents: stats.gross,
+      shippingCostCents: shipping,
+      netSavingsCents: net,
+      basketCostCents: stats.basket,
+      itemCount: stats.count,
       worthIt,
     })
   }
