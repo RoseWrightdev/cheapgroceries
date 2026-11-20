@@ -6,6 +6,13 @@ CheapGroceries analyzes your digital grocery receipts from Gmail (or pasted rece
 
 ---
 
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/b19105ad-1010-4a46-a382-a8b44ad3525c" />
+
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/fe9bade7-5678-4d1d-aef3-b0139d245c4f" />
+
+<img width="1512" height="859" alt="image" src="https://github.com/user-attachments/assets/830d6661-8eb9-46ca-bd4b-29064b5bd782" />
+
+
 ## Key Features
 
 - **Gmail Receipt & Membership Sync:** Connects per-user Google OAuth (`google/gmail-list`, `google/gmail-get`) to import digital receipts from Target, Walmart, Instacart, Amazon, Costco, and regional grocers while auto-detecting active memberships (Amazon Prime, Target Circle 360, Costco, Walmart+, Instacart+, Sam's Club).
