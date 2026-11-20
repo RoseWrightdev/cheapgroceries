@@ -147,7 +147,7 @@ export default function Navigation() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/settings')}>
                   <Settings aria-hidden />
-                  Settings &amp; data
+                  Settings
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => signOut()}>
                   <LogOut aria-hidden />
